@@ -1,0 +1,8 @@
+name: Villages
+main: com.reliableplugins.villages.Main
+version: 1.0
+author: Reachy
+commands:
+  villages:
+    description: Help command for Villages
+    usage: "/villages help"
