@@ -6,24 +6,26 @@
 
 package com.reliableplugins.villages.type;
 
+import com.reliableplugins.villages.utils.BukkitUtil;
 import com.reliableplugins.villages.utils.MathUtil;
 import org.bukkit.Location;
-import org.bukkit.Material;
+import org.bukkit.block.BlockFace;
 import org.bukkit.util.Vector;
 
 import java.util.HashSet;
 import java.util.Random;
 
-public class Village {
-
-    private Location center;
-    private HashSet<VillageHouse> houses;
+public class Village
+{
+    private final Location center;
+    private final HashSet<VillageStructureCuboid> structures;
+    private final VillageRoad mainRoad;
     private int radius;
-    private int houseDensity; // Houses per chunk
-    private int growthRate;
-    private int growthRadius;
+    private final int houseDensity; // Houses per chunk
+    private final int growthRate;
+    private final int growthRadius;
     private int tick;
-    private static Random random = new Random();
+    private static final Random random = new Random();
 
     public Village(Location center, int radiusInitial, int growthRate, int growthRadius, int houseDensity)
     {
@@ -32,13 +34,13 @@ public class Village {
         this.houseDensity = houseDensity;
         this.growthRate = growthRate;
         this.growthRadius = growthRadius;
-        this.houses = new HashSet<>();
+        this.structures = new HashSet<>();
         this.tick = 0;
 
         this.center.add(0, -1, 0);
 
-        this.center.getBlock().setType(Material.GOLD_BLOCK);
-        this.buildInitialRoad();
+        this.mainRoad = new VillageRoad(center);
+        this.initialize();
     }
 
     public void tick()
@@ -46,12 +48,15 @@ public class Village {
         if(++tick >= growthRate)
         {
             tick = 0;
-            expandRoad();
+            mainRoad.expandCross(growthRadius, radius);
 
             radius += growthRadius;
-            int chunks = 4 * radius * radius / 256;
-            int numHouses = houseDensity * chunks;
-            for(int i = houses.size(); i <= numHouses; i++)
+
+            // Calculate the amount of houses that should exist due to the houseDensity
+            // Add in the required amount of houses
+            int chunks = 4 * radius * radius / 256; // chunks = (2*radius blocks)^2 / (16 blocks/chunk)^2
+            int numHouses = houseDensity * chunks;  // houses = houses/chunk * chunks
+            for(int i = structures.size(); i <= numHouses; i++)
             {
                 addHouse(5, 4);
             }
@@ -59,95 +64,65 @@ public class Village {
 
     }
 
-    public void addHouse(Location center, int dimension, int height)
-    {
-        VillageHouse house = new VillageHouse(center, dimension, height);
-        houses.add(house);
-        house.build();
-    }
-
     public void addHouse(int dimension, int height)
     {
         VillageHouse house = new VillageHouse(dimension, height);
         if(findValidSpace(house))
         {
-            houses.add(house);
+            structures.add(house);
             house.build();
         }
     }
 
-    public void expandRoad()
+    public void initialize()
     {
-        for(int i = 0; i <= growthRadius; i++)
-        {
-            center.clone().add(radius + i, 0, -1).getBlock().setType(Material.GRAVEL);
-            center.clone().add(radius + i, 0,  0).getBlock().setType(Material.GRAVEL);
-            center.clone().add(radius + i, 0,  1).getBlock().setType(Material.GRAVEL);
-            center.clone().add(-(radius + i), 0, -1).getBlock().setType(Material.GRAVEL);
-            center.clone().add(-(radius + i), 0,  0).getBlock().setType(Material.GRAVEL);
-            center.clone().add(-(radius + i), 0,  1).getBlock().setType(Material.GRAVEL);
+        mainRoad.initializeCross(radius);
 
-            center.clone().add(-1, 0, radius + i).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 0, 0, radius + i).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 1, 0, radius + i).getBlock().setType(Material.GRAVEL);
-            center.clone().add(-1, 0, -(radius + i)).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 0, 0, -(radius + i)).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 1, 0, -(radius + i)).getBlock().setType(Material.GRAVEL);
-        }
+        VillageWell well = new VillageWell(center, 5, 5);
+        well.build();
+        structures.add(well);
     }
 
-    public void buildInitialRoad()
-    {
-        for(int i = -radius; i <= radius; i++)
-        {
-            center.clone().add(i, 0, -1).getBlock().setType(Material.GRAVEL);
-            center.clone().add(i, 0,  0).getBlock().setType(Material.GRAVEL);
-            center.clone().add(i, 0,  1).getBlock().setType(Material.GRAVEL);
-
-            center.clone().add(-1, 0, i).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 0, 0, i).getBlock().setType(Material.GRAVEL);
-            center.clone().add( 1, 0, i).getBlock().setType(Material.GRAVEL);
-        }
-    }
-
-    public boolean findValidSpace(VillageHouse house)
+    // Returns true on the finding of a valid space for a house
+    // Returns false if there is no valid space
+    public boolean findValidSpace(VillageStructureCuboid house)
     {
         return findValidSpaceHelper(house, 0, 10);
     }
 
-    public boolean findValidSpaceHelper(VillageHouse house, int numTries, int maxTries)
+    public boolean findValidSpaceHelper(VillageStructureCuboid house, int numTries, int maxTries)
     {
         if(numTries >= maxTries)
         {
             return false;
         }
-        Vector possiblePosition;
+
+        boolean alongX = random.nextBoolean();  // if house is along x axis of road
+        int direction = MathUtil.plusOrMinus(); // direction relative to road
+        int dx, dz;
 
         // Place house along the X, 1 block away from the road on the Z
-        if(random.nextBoolean())
+        if(alongX)
         {
-            possiblePosition = new Vector(
-                    MathUtil.plusOrMinus() * random.nextInt(radius + 1),
-                    0,
-                    MathUtil.plusOrMinus() * house.getDimension());
+            house.setDirection(direction == 1 ? BlockFace.NORTH : BlockFace.SOUTH);
+            dx = MathUtil.plusOrMinus() * random.nextInt(radius + 1);
+            dz = direction * house.getDimension();
         }
         // Place house along the Z, 1 block away from the road on the X
         else
         {
-            possiblePosition = new Vector(
-                    MathUtil.plusOrMinus() * house.getDimension(),
-                    0,
-                    MathUtil.plusOrMinus() * random.nextInt(radius + 1));
+            house.setDirection(direction == 1 ? BlockFace.WEST : BlockFace.EAST);
+            dx = direction * house.getDimension();
+            dz = MathUtil.plusOrMinus() * random.nextInt(radius + 1);
         }
 
-        Location possibleLocation = center.clone().add(possiblePosition);
-        possibleLocation = possibleLocation.getWorld().getHighestBlockAt(possibleLocation).getLocation();
-
+        Location possibleLocation = center.clone().add(new Vector(dx, 0, dz));
+        possibleLocation = BukkitUtil.getHighestBlockAt(possibleLocation).getLocation();
         house.setCenter(possibleLocation);
 
-        for(VillageHouse existingHouse : houses)
+        for(VillageStructureCuboid existingStructure : structures)
         {
-            if (existingHouse.willOverlap(house))
+            if (existingStructure.willOverlap(house))
             {
                 return findValidSpaceHelper(house, numTries + 1, maxTries);
             }
